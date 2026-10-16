@@ -81,7 +81,7 @@ function snap(s: Sim): Snap {
     const conf = Math.max(0, Math.min(1, 1 - d.err / 100, margin / 40));
     const confWhy = `fix ±${d.err.toFixed(0)} m, ${d.links} refs, fuel margin ${Math.max(0, margin).toFixed(0)}% after the trip home`;
     if (d.awaiting !== null) intent = s.autonomy === "ask" ? "Holding for your approval" : "Holding briefly for a possible veto";
-    return { id: d.id, name: d.name, color: d.color, mode: d.mode, fuel: d.fuel, err: d.err, links: d.links, flights: d.flights, intent, pending, why: d.why, stats: d.stats, conf, confWhy, awaiting: d.awaiting !== null };
+    return { id: d.id, name: d.name, color: d.color, mode: d.mode, fuel: d.fuel, err: d.err, links: d.links, flights: d.flights, intent, pending, why: d.awaiting !== null ? (s.proposals.find((q) => q.pid === d.awaiting)?.why ?? d.why) : d.why, stats: d.stats, conf, confWhy, awaiting: d.awaiting !== null };
   });
   if (s.reserve < 3) alerts.push({ key: "reserve", sev: s.reserve < 1 ? "warning" : "caution", drone: null, text: `Station propellant low (${s.reserve.toFixed(1)} tanks)`, action: "Limit refuels; plan remaining hops" });
   alerts.sort((a, b) => SEV[a.sev].rank - SEV[b.sev].rank);
@@ -609,26 +609,48 @@ export default function DroneApp() {
   };
 
   const wl = view.workload;
-  const btn = `${orbit ? "min-h-14 px-4 text-base" : "min-h-10 px-3 text-sm"} rounded-md border border-white/20 bg-white/[0.06] font-medium hover:bg-white/10 active:bg-white/20 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white`;
-  const mb = `grid place-items-center rounded-lg border border-white/30 bg-black/70 text-xl font-semibold text-white backdrop-blur hover:bg-black/85 active:bg-white/25 ${orbit ? "h-14 w-14" : "h-11 w-11"}`;
+  const btn = "btn rounded-md border border-white/20 bg-white/[0.06] font-medium hover:bg-white/10 active:bg-white/20 disabled:opacity-40";
+  const mb = "mbtn grid place-items-center rounded-lg border border-white/30 bg-black/70 text-xl font-semibold text-white hover:bg-black/85 active:bg-white/25";
   const hold = (fn: () => void) => {
     let t: ReturnType<typeof setInterval> | undefined;
     const stop = () => t && clearInterval(t);
     return { onPointerDown: () => { fn(); stop(); t = setInterval(fn, 140); }, onPointerUp: stop, onPointerLeave: stop, onPointerCancel: stop, onClick: (e: React.MouseEvent) => e.preventDefault() };
   };
   const st = () => (W / cam.current.tz) * 0.22;
-  const pd = pending ? { d: sim.current.drones[selected], ll: toLatLon(pending) } : null
+  const pd = pending ? { d: sim.current.drones[selected], ll: toLatLon(pending) } : null;
   const pdKm = pd && pending ? (Math.hypot(pending.x - pd.d.x, pending.y - pd.d.y) * 25) / 1000 : 0;
   const closePending = () => { pendingRef.current = null; setPending(null); };
   const sendPending = (add: boolean) => {
     if (pending) send(sim.current, selected, { type: add ? "add" : "goto", pts: [pending] });
     closePending();
   };
-  const warnings = view.alerts.filter((a) => a.sev === "warning");
+
+  // Everything that needs the operator, most urgent first. Only what fits is shown, with a count of the rest,
+  // so the layout never needs an inner scrollbar.
+  const prop = view.proposals[0];
+  const alertSlots = prop ? 1 : 2;
+  const shownAlerts = view.alerts.slice(0, alertSlots);
+  const hidden = view.proposals.length - (prop ? 1 : 0) + view.alerts.length - shownAlerts.length;
+  const sd = view.drones[selected];
+  const dim = "text-xs uppercase tracking-wide text-slate-400";
+  const seg = (on: boolean) => `${btn} !px-1 ${on ? "!border-white/80 bg-white/20" : ""}`;
 
   return (
-    <div className="drone-root flex min-h-screen flex-col bg-[#07090d] p-3 text-[15px] text-slate-100 lg:h-screen lg:overflow-hidden lg:p-4" style={lowGlare ? { filter: "sepia(1) hue-rotate(-30deg) saturate(2.2) brightness(0.7)" } : undefined}>
-      <style>{`.drone-root :focus-visible{outline:3px solid #fff;outline-offset:2px}`}</style>
+    <div
+      className="drone-root flex min-h-screen flex-col bg-[#07090d] p-3 text-[15px] text-slate-100 min-[1100px]:h-screen min-[1100px]:overflow-hidden"
+      data-orbit={orbit}
+      style={lowGlare ? { filter: "sepia(1) hue-rotate(-30deg) saturate(2.2) brightness(0.7)" } : undefined}
+    >
+      <style>{`
+        .drone-root :focus-visible{outline:3px solid #fff;outline-offset:2px}
+        .drone-root .btn{min-height:44px;padding-inline:.75rem;font-size:.875rem}
+        .drone-root .mbtn{height:44px;width:44px}
+        .drone-root[data-orbit="true"] .btn{min-height:56px;padding-inline:1rem;font-size:1rem}
+        .drone-root[data-orbit="true"] .mbtn{height:56px;width:56px}
+        @media (max-height:860px){.drone-root[data-orbit="true"] .btn{min-height:48px}.drone-root[data-orbit="true"] .mbtn{height:48px;width:48px}}
+        @media (max-height:740px){.drone-root .hide-short{display:none}}
+        @media (max-height:760px){.drone-root[data-orbit="true"] .btn{min-height:44px}.drone-root[data-orbit="true"] .mbtn{height:44px;width:44px}}
+      `}</style>
       <div className="sr-only" role="status" aria-live="assertive">{announce}</div>
       <header className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <h1 className="text-lg font-semibold">Lunar Swarm Control</h1>
@@ -638,24 +660,83 @@ export default function DroneApp() {
           </span>
           <span className="font-mono">MET {Math.floor(view.t / 60)}:{String(Math.floor(view.t % 60)).padStart(2, "0")}</span>
           <span>
-            Operator workload{" "}
-            <span className="inline-block h-2 w-20 overflow-hidden rounded bg-white/10 align-middle" role="meter" aria-valuenow={Math.round(wl * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Operator workload">
+            Workload{" "}
+            <span className="inline-block h-2 w-16 overflow-hidden rounded bg-white/10 align-middle" role="meter" aria-valuenow={Math.round(wl * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Operator workload">
               <span className="block h-full" style={{ width: `${wl * 100}%`, background: wl > 0.66 ? "#ff6b6b" : wl > 0.33 ? "#ffb454" : "#6ee7b7" }} />
             </span>{" "}
             {wl > 0.66 ? "High" : wl > 0.33 ? "Medium" : "Low"}
           </span>
+          {minutes >= 60 && <span role="status" className="rounded bg-sky-400/15 px-2 py-0.5 text-sky-200">● On console {minutes} min: take a break</span>}
           <button className={btn} aria-pressed={orbit} onClick={() => setOrbit(!orbit)}>Orbit mode {orbit ? "on" : "off"}</button>
           <button className={btn} aria-pressed={lowGlare} onClick={() => setLowGlare(!lowGlare)}>Low-glare {lowGlare ? "on" : "off"}</button>
         </div>
       </header>
 
-      {minutes >= 60 && (
-        <div role="status" className="mb-3 rounded-md border border-sky-400/40 bg-sky-400/10 px-3 py-2 text-sm">● You have been on console {minutes} min. Hand drones to auto survey and take a short break.</div>
-      )}
+      <div className="flex flex-col gap-3 min-[1100px]:grid min-[1100px]:min-h-0 min-[1100px]:flex-1 min-[1100px]:grid-cols-[300px_minmax(0,1fr)_320px]">
+        {/* LEFT: what needs me, and every drone at a glance */}
+        <div className="flex min-h-0 flex-col gap-3 max-[1099px]:contents">
+          <section aria-label="Needs attention" className="order-1 rounded-lg border border-white/15 bg-white/[0.04] p-2">
+            <h2 className="flex items-center justify-between px-1 text-sm font-semibold text-slate-300">
+              Needs you <span className="font-mono">{view.proposals.length + view.alerts.length}</span>
+            </h2>
+            {prop && (
+              <div className="mt-1 rounded border border-sky-400/50 bg-sky-400/[0.08] p-2 text-sm">
+                <button className="w-full text-left" onClick={() => setSelected(prop.drone)}>
+                  <b style={{ color: prop.color }}>{prop.name}</b> proposes a {prop.km.toFixed(1)} km leg (~{prop.fuelEst.toFixed(0)}% fuel)
+                  <span className="block text-xs text-slate-300">
+                    {prop.left === null ? "Waiting for your approval" : `Starts in ${prop.left.toFixed(0)} s unless vetoed`} · your reply takes {latency.toFixed(1)} s
+                  </span>
+                </button>
+                <div className="mt-1.5 grid grid-cols-2 gap-2">
+                  <button className={btn} onClick={() => send(sim.current, prop.drone, { type: "approve", pid: prop.pid })}>Approve</button>
+                  <button className={`${btn} !border-red-400/60`} onClick={() => send(sim.current, prop.drone, { type: "veto", pid: prop.pid })}>Veto</button>
+                </div>
+              </div>
+            )}
+            {shownAlerts.map((a) => (
+              <button key={a.key} onClick={() => a.drone !== null && setSelected(a.drone)} className="mt-1 flex min-h-11 w-full items-start gap-2 rounded px-2 py-1 text-left hover:bg-white/10">
+                <span aria-hidden style={{ color: SEV[a.sev].color }}>{SEV[a.sev].icon}</span>
+                <span>
+                  <span className="sr-only">{a.sev}: </span>
+                  <span className="block text-sm leading-snug" style={{ color: a.sev === "advisory" ? undefined : SEV[a.sev].color }}>{a.text}</span>
+                  <span className="block text-xs text-slate-400">→ {a.action}</span>
+                </span>
+              </button>
+            ))}
+            {!prop && shownAlerts.length === 0 && <p className="px-1 py-2 text-sm text-slate-400">✓ Nothing needs you. Swarm is nominal.</p>}
+            {hidden > 0 && <p className="px-1 pt-1 text-xs text-slate-300">+{hidden} more, most urgent shown first</p>}
+          </section>
 
-      <div className="grid gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_auto_minmax(0,1fr)_auto_auto]">
-        <div className="flex min-h-0 flex-col lg:col-start-1 lg:row-span-5 lg:row-start-1 lg:order-none order-2">
-          <div className="relative" style={{ aspectRatio: `${W}/${H}`, width: "min(100%, calc((100dvh - 330px) * 1.6667))" }}>
+          <section aria-label="Drones" className="order-3 flex flex-col gap-1.5">
+            <h2 className="sr-only">All drones</h2>
+            {view.drones.map((d) => {
+              const open = d.id === selected;
+              return (
+                <button key={d.id} onClick={() => setSelected(d.id)} aria-pressed={open} className={`rounded-lg border p-1.5 text-left ${open ? "border-white/80 bg-white/12" : "border-white/15 bg-white/[0.03]"}`}>
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 font-medium">
+                      <span className="grid h-6 w-6 place-items-center rounded-full text-sm font-bold text-black" style={{ background: d.color }}>{d.id + 1}</span>
+                      {d.name}
+                    </span>
+                    <span className="rounded bg-white/10 px-2 py-0.5 text-xs">{MODE[d.mode].icon} {MODE[d.mode].label}{d.pending ? ` · ${d.pending} sent` : ""}</span>
+                  </span>
+                  <span className="mt-1 flex items-center gap-2 font-mono text-xs text-slate-300">
+                    <span className="h-2 w-16 shrink-0 overflow-hidden rounded bg-white/10">
+                      <span className="block h-full" style={{ width: `${d.fuel}%`, background: d.fuel < 15 ? "#ff6b6b" : d.fuel < 30 ? "#ffb454" : "#6ee7b7" }} />
+                    </span>
+                    <span className="w-14">{d.fuel < 30 && "▲ "}{d.fuel.toFixed(0)}%</span>
+                    <span className={d.err > 40 ? "text-red-300" : ""}>±{d.err.toFixed(0)} m</span>
+                    <span>{d.links} links</span>
+                  </span>
+                </button>
+              );
+            })}
+          </section>
+        </div>
+
+        {/* CENTRE: the map */}
+        <div className="order-2 flex min-h-0 min-w-0 flex-col items-start min-[1100px]:order-none">
+          <div className="relative w-full min-[1100px]:w-[min(100%,calc((100dvh_-_400px)*1.6667))]" style={{ aspectRatio: `${W}/${H}` }}>
             <canvas
               ref={canvas}
               width={W}
@@ -669,19 +750,19 @@ export default function DroneApp() {
               className={`block h-full w-full touch-none rounded-lg border ${view.blackout ? "border-amber-400 opacity-70" : "border-white/15"}`}
             />
             {pending && pd && (
-              <div role="dialog" aria-label="Confirm destination" className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-white/40 bg-[#0b0d12]/95 p-2 backdrop-blur sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-[min(92%,560px)]">
+              <div role="dialog" aria-label="Confirm destination" className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-white/40 bg-[#0b0d12]/95 p-2 backdrop-blur">
                 <p className="text-sm">
-                  Send <b style={{ color: pd.d.color }}>{pd.d.name}</b> to <span className="font-mono">{pd.ll}</span>: {pdKm.toFixed(1)} km, about {(pdKm * 1000 / 25 * 0.02).toFixed(0)}% fuel. Arrives at the drone after {latency.toFixed(1)} s.
+                  Send <b style={{ color: pd.d.color }}>{pd.d.name}</b> to <span className="font-mono">{pd.ll}</span>: {pdKm.toFixed(1)} km, about {(pdKm * 1000 / 25 * 0.02).toFixed(0)}% fuel. Arrives after {latency.toFixed(1)} s.
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button className={`${btn} flex-1`} onClick={() => sendPending(false)}>Send</button>
-                  <button className={`${btn} flex-1`} onClick={() => sendPending(true)}>Add waypoint</button>
-                  <button className={`${btn} flex-1`} onClick={closePending}>Cancel</button>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  <button className={btn} onClick={() => sendPending(false)}>Send</button>
+                  <button className={btn} onClick={() => sendPending(true)}>Add waypoint</button>
+                  <button className={btn} onClick={closePending}>Cancel</button>
                 </div>
               </div>
             )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2" role="toolbar" aria-label="Map controls">
+          <div className="mt-2 flex w-full flex-wrap items-center gap-2" role="toolbar" aria-label="Map controls">
             <button className={mb} aria-label="Zoom out" onClick={() => zoomAt(0.5)}>−</button>
             <button className={mb} aria-label="Zoom in" onClick={() => zoomAt(2)}>+</button>
             <button className={mb} aria-label="Fit whole area" title="Fit whole area" onClick={fit}>⤢</button>
@@ -693,137 +774,79 @@ export default function DroneApp() {
               <button className={mb} aria-label="Pan down" {...hold(() => panBy(0, st() * 0.6))}>▼</button>
               <button className={mb} aria-label="Pan right" {...hold(() => panBy(st(), 0))}>▶</button>
             </div>
-            <span className="ml-1 font-mono text-sm text-slate-300">{camInfo}</span>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-400">
-            <span>Mapped <b className="text-slate-100">{(view.mapped * 100).toFixed(0)}%</b></span>
-            <span>Targets <b className="text-slate-100">{view.found}/{view.targets}</b></span>
-            <span>Station propellant <b className="text-slate-100">{view.reserve.toFixed(1)}</b> tanks</span>
-                        <span className="text-slate-400">Dashed ring = command still in transit · red halo = poor position fix</span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">
-            Terrain: NASA LRO Wide Angle Camera global mosaic (NASA/GSFC/Arizona State University, via NASA Moon Trek), ~83 m/px, Mare Tranquillitatis pit region, about 40 × 24 km. Lighter patches are areas your drones have surveyed; the pit location is real, the lander, beacons and survey sites are simulated.
+          <p className="mt-1.5 font-mono text-sm text-slate-300">{camInfo}</p>
+          <p className="text-sm text-slate-400">
+            Mapped <b className="text-slate-100">{(view.mapped * 100).toFixed(0)}%</b> · Targets <b className="text-slate-100">{view.found}/{view.targets}</b> · Station propellant <b className="text-slate-100">{view.reserve.toFixed(1)}</b> tanks
           </p>
-          <details className="mt-2 text-sm text-slate-400">
+          <section aria-label="Event log" role="log" className="mt-1.5 w-full font-mono text-xs leading-relaxed text-slate-400">
+            {view.log.slice(0, 3).map((l, i) => {
+              const m = l.match(/^(T\+\d+s) \[(AUTO|CREW|SYS)\] (.*)$/);
+              const tone = { AUTO: "text-sky-300", CREW: "text-emerald-300", SYS: "text-slate-300" };
+              return m ? (
+                <div key={i} className={`truncate ${i === 0 ? "text-slate-100" : ""}`}>
+                  {m[1]} <b className={tone[m[2] as "AUTO"]}>{m[2] === "AUTO" ? "DRONE" : m[2]}</b> {m[3]}
+                </div>
+              ) : <div key={i}>{l}</div>;
+            })}
+          </section>
+          <p className="mt-1.5 text-xs text-slate-400">
+            Terrain: NASA LRO Wide Angle Camera mosaic (NASA/GSFC/Arizona State University, via NASA Moon Trek), about 83 m/px, 40 × 24 km. Only the terrain and pit location are real; lander, beacons and sites are simulated.
+          </p>
+          <details className="relative mt-1 text-sm text-slate-400">
             <summary className="cursor-pointer">Controls &amp; shortcuts</summary>
-            <p className="mt-1">Map: drag to move, pinch or scroll to zoom, or use the large buttons. Tap to place a target, then confirm. + / − zoom, 0 fit, C follow, Shift+arrows pan.</p>
-            <p className="mt-1">1–6 select drone · click terrain to send it (Shift adds waypoints) · WASD / arrows fly the selected drone manually. All commands reach the drone after the link delay.</p>
+            <div className="absolute bottom-full left-0 z-20 mb-1 w-[min(90vw,420px)] rounded-lg border border-white/30 bg-[#0b0d12] p-3 text-slate-300">
+              <p>Map: drag to move, pinch or scroll to zoom, or use the buttons. Tap to place a target, then confirm. + / − zoom, 0 fit, C follow, Shift+arrows pan.</p>
+              <p className="mt-1">1–6 select a drone · WASD / arrows fly it manually. All commands reach the drone after the link delay.</p>
+            </div>
           </details>
         </div>
 
-          <section aria-label="Attention queue" className="order-1 lg:col-start-2 lg:row-start-1 rounded-lg border border-white/15 bg-white/[0.04]">
-            <h2 className="flex items-center justify-between px-3 pt-2 text-sm font-semibold text-slate-300">
-              Needs attention <span className="font-mono">{view.alerts.length}</span>
+        {/* RIGHT: selected drone, then swarm-wide controls */}
+        <div className="flex min-h-0 flex-col gap-2 max-[1099px]:contents">
+          <section aria-label="Selected drone" className="order-4 rounded-lg border border-white/30 bg-white/[0.06] p-2.5">
+            <h2 className="flex items-center justify-between gap-2 text-sm font-semibold">
+              <span className="flex items-center gap-2">
+                <span className="grid h-6 w-6 place-items-center rounded-full text-sm font-bold text-black" style={{ background: sd.color }}>{sd.id + 1}</span>
+                {sd.name}
+              </span>
+              <span className="font-mono text-xs font-normal text-slate-300">{sd.flights} hops · {sd.links} links</span>
             </h2>
-            <ul className="max-h-40 overflow-auto p-2" >
-              {view.alerts.length === 0 && <li className="px-1 py-2 text-sm text-slate-400">✓ Nothing needs you. Swarm is nominal.</li>}
-              {view.alerts.map((a) => (
-                <li key={a.key}>
-                  <button onClick={() => a.drone !== null && setSelected(a.drone)} className="flex min-h-11 w-full items-start gap-2 rounded px-2 py-1.5 text-left hover:bg-white/10">
-                    <span aria-hidden style={{ color: SEV[a.sev].color }} className="mt-0.5">{SEV[a.sev].icon}</span>
-                    <span>
-                      <span className="sr-only">{a.sev}: </span>
-                      <span className="block text-sm" style={{ color: a.sev === "advisory" ? undefined : SEV[a.sev].color }}>{a.text}</span>
-                      <span className="block text-xs text-slate-400">→ {a.action}</span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <dl className="mt-1.5 space-y-1">
+              <div><dt className={dim}>Doing</dt><dd className="leading-snug text-slate-100">{sd.intent}</dd></div>
+              <div><dt className={dim}>Why</dt><dd className="line-clamp-2 min-h-[2.6em] text-sm leading-snug text-slate-300" title={sd.why}>{sd.why || "No decision made yet."}</dd></div>
+              <div>
+                <dt className={dim}>Confidence</dt>
+                <dd className="flex items-center gap-2 text-sm">
+                  <span className="h-2 w-14 overflow-hidden rounded bg-white/10"><span className="block h-full" style={{ width: `${sd.conf * 100}%`, background: sd.conf > 0.7 ? "#6ee7b7" : sd.conf > 0.4 ? "#ffb454" : "#ff6b6b" }} /></span>
+                  {sd.conf > 0.7 ? "High" : sd.conf > 0.4 ? "Medium" : "Low"} {(sd.conf * 100).toFixed(0)}%
+                </dd>
+                <dd className="hide-short truncate text-xs text-slate-400" title={sd.confWhy}>{sd.confWhy}</dd>
+              </div>
+              <div><dt className={dim}>Track record</dt><dd className="min-h-[2.4em] text-xs text-slate-300">{sd.stats.legs} legs · {sd.stats.approved} approved · {sd.stats.vetoed} vetoed · {sd.stats.overrides} overridden · {sd.stats.recoveries} self-recoveries</dd></div>
+            </dl>
+            <div className="mt-2 grid grid-cols-4 gap-1.5">
+              <button className={`${btn} !px-1`} aria-label="Auto survey" onClick={() => cmd("auto")}>Survey</button>
+              <button className={`${btn} !px-1`} aria-label="Return to lander" onClick={() => cmd("rtb")}>Return</button>
+              <button className={`${btn} !px-1`} aria-label="Hold position" onClick={() => cmd("stop")}>Hold</button>
+              <button className={`${btn} !px-1`} aria-label="Cancel commands still in transit" onClick={cancelPending} disabled={!sd.pending}>Cancel</button>
+            </div>
           </section>
 
-          {view.proposals.length > 0 && (
-            <section aria-label="Drone proposals" className="order-2 rounded-lg border border-sky-400/50 bg-sky-400/[0.07] p-2 lg:col-start-2 lg:row-start-2">
-              <h2 className="text-sm font-semibold text-sky-200">Drone proposals · {view.proposals.length}</h2>
-              <ul className="mt-1 space-y-2">
-                {view.proposals.slice(0, 2).map((p) => (
-                  <li key={p.pid} className="rounded border border-white/15 bg-black/20 p-2 text-sm">
-                    <p>
-                      <b style={{ color: p.color }}>{p.name}</b> proposes a {p.km.toFixed(1)} km leg (~{p.fuelEst.toFixed(0)}% fuel).
-                    </p>
-                    <p className="text-xs text-slate-300">{p.why}</p>
-                    <p className="mt-1 text-xs text-slate-300">
-                      {p.left === null ? "Waiting for your approval." : `Proceeds in ${p.left.toFixed(0)} s unless vetoed.`} Your reply takes {latency.toFixed(1)} s to reach it.
-                    </p>
-                    <div className="mt-1.5 flex gap-2">
-                      <button className={btn} onClick={() => send(sim.current, p.drone, { type: "approve", pid: p.pid })}>Approve</button>
-                      <button className={`${btn} !border-red-400/60`} onClick={() => send(sim.current, p.drone, { type: "veto", pid: p.pid })}>Veto</button>
-                    </div>
-                  </li>
-                ))}
-                {view.proposals.length > 2 && <li className="text-xs text-slate-300">+{view.proposals.length - 2} more waiting</li>}
-              </ul>
-            </section>
-          )}
-
-          <section aria-label="Drones" className="order-3 min-h-0 space-y-1.5 lg:col-start-2 lg:row-start-3 lg:overflow-y-auto lg:pr-1">
-            <h2 className="sr-only">Drones</h2>
-            {view.drones.map((d) => {
-              const open = d.id === selected;
-              return (
-                <div key={d.id} className={`rounded-lg border ${open ? "border-white/70 bg-white/10" : "border-white/15 bg-white/[0.03]"}`}>
-                  <button onClick={() => setSelected(d.id)} aria-pressed={open} className="min-h-11 w-full p-2 text-left">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-2 font-medium">
-                        <span className="grid h-6 w-6 place-items-center rounded-full text-sm font-bold text-black" style={{ background: d.color }}>{d.id + 1}</span>
-                        {d.name}
-                      </span>
-                      <span className="rounded bg-white/10 px-2 py-0.5 text-xs">{MODE[d.mode].icon} {MODE[d.mode].label}{d.pending ? ` · ${d.pending} sent` : ""}</span>
-                    </div>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <span className="h-2 flex-1 overflow-hidden rounded bg-white/10">
-                        <span className="block h-full" style={{ width: `${d.fuel}%`, background: d.fuel < 15 ? "#ff6b6b" : d.fuel < 30 ? "#ffb454" : "#6ee7b7" }} />
-                      </span>
-                      <span className="w-24 text-right font-mono text-xs">{d.fuel < 30 && "▲ "}fuel {d.fuel.toFixed(0)}%</span>
-                    </div>
-                  </button>
-                  {open && (
-                    <div className="border-t border-white/15 p-2 text-sm">
-                      <dl className="space-y-1.5 text-sm">
-                        <div><dt className="text-xs uppercase tracking-wide text-slate-400">Doing</dt><dd className="text-slate-100">{d.intent}</dd></div>
-                        {d.why && <div><dt className="text-xs uppercase tracking-wide text-slate-400">Why</dt><dd className="text-slate-300">{d.why}</dd></div>}
-                        <div>
-                          <dt className="text-xs uppercase tracking-wide text-slate-400">Self-assessed confidence</dt>
-                          <dd className="flex items-center gap-2">
-                            <span className="h-2 w-16 overflow-hidden rounded bg-white/10"><span className="block h-full" style={{ width: `${d.conf * 100}%`, background: d.conf > 0.7 ? "#6ee7b7" : d.conf > 0.4 ? "#ffb454" : "#ff6b6b" }} /></span>
-                            <span className="text-slate-100">{d.conf > 0.7 ? "High" : d.conf > 0.4 ? "Medium" : "Low"} {(d.conf * 100).toFixed(0)}%</span>
-                          </dd>
-                          <dd className="text-xs text-slate-400">{d.confWhy}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs uppercase tracking-wide text-slate-400">Track record</dt>
-                          <dd className="text-xs text-slate-300">{d.stats.legs} legs done · {d.stats.approved} approved · {d.stats.vetoed} vetoed · {d.stats.overrides} overridden · {d.stats.recoveries} self-recoveries</dd>
-                        </div>
-                      </dl>
-                      <p className="mt-1 font-mono text-xs text-slate-400">±{d.err.toFixed(0)} m · {d.links} links · {d.flights} hops</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button className={btn} onClick={() => cmd("auto")}>Auto survey</button>
-                        <button className={btn} onClick={() => cmd("rtb")}>Return</button>
-                        <button className={btn} onClick={() => cmd("stop")}>Hold</button>
-                        <button className={btn} onClick={cancelPending} disabled={!d.pending}>Cancel sent</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </section>
-
-          <section className="order-4 space-y-2 lg:col-start-2 lg:row-start-4 lg:max-h-[46vh] lg:overflow-y-auto">
-            <h2 className="text-sm font-semibold text-slate-300">Whole swarm</h2>
-            <div className="flex flex-wrap gap-2">
-              <button className={btn} onClick={() => sim.current.drones.forEach((d) => cmd("auto", d.id))}>Survey all</button>
-              <button className={`${btn} ${confirm === "recall" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("recall", () => sim.current.drones.forEach((d) => cmd("rtb", d.id)))}>
-                {confirm === "recall" ? "Press again to recall" : "Recall all"}
+          <section aria-label="Swarm controls" className="order-5 flex flex-col gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
+              <button className={`${btn} !px-1`} onClick={() => sim.current.drones.forEach((d) => cmd("auto", d.id))}>Survey all</button>
+              <button className={`${btn} !px-1 ${confirm === "recall" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("recall", () => sim.current.drones.forEach((d) => cmd("rtb", d.id)))}>
+                {confirm === "recall" ? "Confirm?" : "Recall all"}
               </button>
-              <button className={`${btn} ${confirm === "reset" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("reset", () => { sim.current = createSim(latency, autonomy); setView(snap(sim.current)); })}>
-                {confirm === "reset" ? "Press again to reset" : "Reset"}
+              <button className={`${btn} !px-1 ${confirm === "reset" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("reset", () => { sim.current = createSim(latency, autonomy); setView(snap(sim.current)); })}>
+                {confirm === "reset" ? "Confirm?" : "Reset"}
               </button>
             </div>
-            <label className="block text-sm text-slate-300">
-              Send selected drone to
+            <label className="block text-xs text-slate-300">
+              Send {sd.name} to
               <select
-                className="mt-1 block min-h-10 w-full rounded-md border border-white/20 bg-[#10131a] px-2 text-sm"
+                className="btn mt-0.5 block w-full rounded-md border border-white/20 bg-[#10131a] px-2"
                 value=""
                 onChange={(e) => {
                   const pl = places[Number(e.target.value)];
@@ -835,48 +858,35 @@ export default function DroneApp() {
               </select>
             </label>
             <fieldset>
-              <legend className="text-sm text-slate-300">Autonomy policy</legend>
-              <div className="mt-1 grid grid-cols-3 gap-1.5" role="radiogroup">
+              <legend className="text-xs text-slate-300">Autonomy policy</legend>
+              <div className="mt-0.5 grid grid-cols-3 gap-1.5" role="radiogroup">
                 {([["ask", "Ask first"], ["veto", "Veto window"], ["full", "Full auto"]] as const).map(([v, label]) => (
-                  <button key={v} role="radio" aria-checked={autonomy === v} onClick={() => setAutonomy(v)} className={`${btn} px-1 ${autonomy === v ? "!border-white/80 bg-white/20" : ""}`}>{label}</button>
+                  <button key={v} role="radio" aria-checked={autonomy === v} onClick={() => setAutonomy(v)} className={`${seg(autonomy === v)} leading-tight`}>{label}</button>
                 ))}
               </div>
-              <p className="mt-1 text-xs text-slate-300">
-                {autonomy === "ask" && "Unusual legs wait for approval. Safest, but stalls if the link drops."}
-                {autonomy === "veto" && "Unusual legs start on their own after a window longer than the round trip, unless you veto."}
-                {autonomy === "full" && "Drones decide every leg. You can still override any time."}
-                {" "}Always on board, with no link needed: return at low fuel, recover a lost fix, never exceed the fuel margin.
+              <p className="hide-short mt-0.5 min-h-[2.4em] text-xs leading-snug text-slate-300">
+                {autonomy === "ask" && "Unusual legs wait for approval. Stalls if the link drops."}
+                {autonomy === "veto" && "Unusual legs start after a window longer than the round trip, unless vetoed."}
+                {autonomy === "full" && "Drones decide every leg. You can override any time."}
               </p>
             </fieldset>
-            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
-              Operator link
-              <button className={btn} onClick={() => setLatency(0.2)}>Lunar crew 0.2 s</button>
-              <button className={btn} onClick={() => setLatency(1.3)}>Earth 1.3 s</button>
-              <button className={`${btn} !border-amber-400/60`} onClick={() => startBlackout(sim.current, 30)}>Cut link 30 s</button>
+            <div>
+              <p className="text-xs text-slate-300">Operator link · {latency.toFixed(1)} s one-way</p>
+              <div className="mt-0.5 grid grid-cols-3 gap-1.5">
+                <button className={seg(latency === 0.2)} onClick={() => setLatency(0.2)}>Crew 0.2 s</button>
+                <button className={seg(latency === 1.3)} onClick={() => setLatency(1.3)}>Earth 1.3 s</button>
+                <button className={`${seg(false)} !border-amber-400/60`} onClick={() => startBlackout(sim.current, 30)}>Cut 30 s</button>
+              </div>
+              <input aria-label="Link delay in seconds" type="range" min={0} max={3} step={0.1} value={latency} onChange={(e) => setLatency(Number(e.target.value))} className="mt-1 block h-6 w-full" />
             </div>
-            <label className="block text-sm text-slate-300">
-              Link delay: {latency.toFixed(1)} s one-way
-              <input type="range" min={0} max={3} step={0.1} value={latency} onChange={(e) => setLatency(Number(e.target.value))} className="block h-8 w-full" />
-            </label>
-            <div className="flex items-center gap-2 text-sm text-slate-300">
-              Sim speed
+            <div className="grid grid-cols-4 items-center gap-1.5">
+              <span className="text-xs text-slate-300">Sim speed</span>
               {[1, 4, 16].map((v) => (
-                <button key={v} aria-pressed={speed === v} onClick={() => setSpeed(v)} className={`${btn} min-w-12 ${speed === v ? "!border-white/80 bg-white/20" : ""}`}>{v}×</button>
+                <button key={v} aria-pressed={speed === v} onClick={() => setSpeed(v)} className={seg(speed === v)}>{v}×</button>
               ))}
             </div>
           </section>
-
-          <section aria-label="Event log" role="log" className="order-5 [@media(max-height:700px)]:hidden lg:col-start-2 lg:row-start-5 rounded-lg border border-white/15 bg-black/30 p-2 font-mono text-xs leading-relaxed text-slate-400">
-            {view.log.slice(0, 6).map((l, i) => {
-              const m = l.match(/^(T\+\d+s) \[(AUTO|CREW|SYS)\] (.*)$/);
-              const tone = { AUTO: "text-sky-300", CREW: "text-emerald-300", SYS: "text-slate-300" };
-              return m ? (
-                <div key={i} className={i === 0 ? "text-slate-100" : ""}>
-                  {m[1]} <b className={tone[m[2] as "AUTO"]}>{m[2] === "AUTO" ? "DRONE" : m[2]}</b> {m[3]}
-                </div>
-              ) : <div key={i}>{l}</div>;
-            })}
-          </section>
+        </div>
       </div>
     </div>
   );

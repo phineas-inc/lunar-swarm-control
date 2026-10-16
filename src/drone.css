@@ -10,3 +10,9 @@ body {
   color: #f1f5f9;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}

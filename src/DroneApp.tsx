@@ -125,6 +125,16 @@ export default function DroneApp() {
   const [confirm, setConfirm] = useState<string | null>(null);
   const [view, setView] = useState<Snap>(() => snap(sim.current));
   const [minutes, setMinutes] = useState(0);
+  // One fixed console layout, scaled to fit the window: nothing ever scrolls, at any window size.
+  const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
+  useEffect(() => {
+    const on = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  const DW = Math.max(vp.w, 1100);
+  const DH = Math.max(vp.h, 700);
+  const scale = Math.min(vp.w / DW, vp.h / DH);
   const [announce, setAnnounce] = useState("");
   const seen = useRef(new Set<string>());
   selRef.current = selected;
@@ -636,10 +646,20 @@ export default function DroneApp() {
   const seg = (on: boolean) => `${btn} !px-1 ${on ? "!border-white/80 bg-white/20" : ""}`;
 
   return (
+    <div style={{ width: "100vw", height: "100dvh", overflow: "hidden", background: "#07090d" }}>
     <div
-      className="drone-root flex min-h-screen flex-col bg-[#07090d] p-3 text-[15px] text-slate-100 min-[1100px]:h-screen min-[1100px]:overflow-hidden"
+      className="drone-root flex flex-col overflow-hidden bg-[#07090d] p-3 text-[15px] text-slate-100"
       data-orbit={orbit}
-      style={lowGlare ? { filter: "sepia(1) hue-rotate(-30deg) saturate(2.2) brightness(0.7)" } : undefined}
+      data-tier={DH <= 740 ? "xs" : DH <= 860 ? "s" : "l"}
+      style={{
+        width: DW,
+        height: DH,
+        transform: `scale(${scale})`,
+        transformOrigin: "0 0",
+        // @ts-expect-error css custom property
+        "--dh": `${DH}px`,
+        ...(lowGlare ? { filter: "sepia(1) hue-rotate(-30deg) saturate(2.2) brightness(0.7)" } : {}),
+      }}
     >
       <style>{`
         .drone-root :focus-visible{outline:3px solid #fff;outline-offset:2px}
@@ -647,9 +667,9 @@ export default function DroneApp() {
         .drone-root .mbtn{height:44px;width:44px}
         .drone-root[data-orbit="true"] .btn{min-height:56px;padding-inline:1rem;font-size:1rem}
         .drone-root[data-orbit="true"] .mbtn{height:56px;width:56px}
-        @media (max-height:860px){.drone-root[data-orbit="true"] .btn{min-height:48px}.drone-root[data-orbit="true"] .mbtn{height:48px;width:48px}}
-        @media (max-height:740px){.drone-root .hide-short{display:none}}
-        @media (max-height:760px){.drone-root[data-orbit="true"] .btn{min-height:44px}.drone-root[data-orbit="true"] .mbtn{height:44px;width:44px}}
+        .drone-root[data-orbit="true"][data-tier="s"] .btn{min-height:48px}.drone-root[data-orbit="true"][data-tier="s"] .mbtn{height:48px;width:48px}
+        .drone-root[data-tier="xs"] .hide-short{display:none}
+        .drone-root[data-orbit="true"][data-tier="xs"] .btn{min-height:44px}.drone-root[data-orbit="true"][data-tier="xs"] .mbtn{height:44px;width:44px}
       `}</style>
       <div className="sr-only" role="status" aria-live="assertive">{announce}</div>
       <header className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -672,9 +692,9 @@ export default function DroneApp() {
         </div>
       </header>
 
-      <div className="flex flex-col gap-3 min-[1100px]:grid min-[1100px]:min-h-0 min-[1100px]:flex-1 min-[1100px]:grid-cols-[300px_minmax(0,1fr)_320px]">
+      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_320px]">
         {/* LEFT: what needs me, and every drone at a glance */}
-        <div className="flex min-h-0 flex-col gap-3 max-[1099px]:contents">
+        <div className="flex min-h-0 flex-col gap-3">
           <section aria-label="Needs attention" className="order-1 rounded-lg border border-white/15 bg-white/[0.04] p-2">
             <h2 className="flex items-center justify-between px-1 text-sm font-semibold text-slate-300">
               Needs you <span className="font-mono">{view.proposals.length + view.alerts.length}</span>
@@ -735,8 +755,8 @@ export default function DroneApp() {
         </div>
 
         {/* CENTRE: the map */}
-        <div className="order-2 flex min-h-0 min-w-0 flex-col items-start min-[1100px]:order-none">
-          <div className="relative w-full min-[1100px]:w-[min(100%,calc((100dvh_-_400px)*1.6667))]" style={{ aspectRatio: `${W}/${H}` }}>
+        <div className="flex min-h-0 min-w-0 flex-col items-start">
+          <div className="relative w-full w-[min(100%,calc((var(--dh)_-_400px)*1.6667))]" style={{ aspectRatio: `${W}/${H}` }}>
             <canvas
               ref={canvas}
               width={W}
@@ -803,7 +823,7 @@ export default function DroneApp() {
         </div>
 
         {/* RIGHT: selected drone, then swarm-wide controls */}
-        <div className="flex min-h-0 flex-col gap-2 max-[1099px]:contents">
+        <div className="flex min-h-0 flex-col gap-2">
           <section aria-label="Selected drone" className="order-4 rounded-lg border border-white/30 bg-white/[0.06] p-2.5">
             <h2 className="flex items-center justify-between gap-2 text-sm font-semibold">
               <span className="flex items-center gap-2">
@@ -888,6 +908,7 @@ export default function DroneApp() {
           </section>
         </div>
       </div>
+    </div>
     </div>
   );
 }

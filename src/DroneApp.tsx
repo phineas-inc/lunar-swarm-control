@@ -163,6 +163,14 @@ export default function DroneApp() {
     const next = { w: Math.floor(w), h: Math.floor((w * H) / W) };
     setFit2((f) => (f.w === next.w && f.h === next.h ? f : next));
   });
+  // ?demo=1 starts a busy example run (used for the thumbnail and for quick demos)
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).get("demo")) return;
+    addDrone(sim.current);
+    addDrone(sim.current);
+    setSpeed(16);
+    sim.current.drones.forEach((d) => send(sim.current, d.id, { type: "auto" }));
+  }, []);
   const [announce, setAnnounce] = useState("");
   const seen = useRef(new Set<string>());
   selRef.current = selected;

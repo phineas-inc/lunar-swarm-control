@@ -457,7 +457,7 @@ export function step(s: Sim, dt: number) {
       }
 
       const home = homeCost(s, d);
-      if (d.mode !== "rtb" && d.mode !== "idle" && d.fuel < home + 8) {
+      if (d.mode !== "rtb" && d.mode !== "idle" && d.mode !== "charging" && d.fuel < home + 8) {
         d.resume = d.mode === "auto" || d.savedMode === "auto";
         if (d.awaiting !== null) dropProposal(s, d);
         d.mode = "rtb";

@@ -133,8 +133,26 @@ export default function DroneApp() {
     return () => window.removeEventListener("resize", on);
   }, []);
   const DW = Math.max(vp.w, 1100);
-  const DH = Math.max(vp.h, 700);
+  const DH = Math.max(vp.h, 730);
   const scale = Math.min(vp.w / DW, vp.h / DH);
+  const colBox = useRef<HTMLDivElement>(null);
+  const belowBox = useRef<HTMLDivElement>(null);
+  const [fit2, setFit2] = useState({ w: 600, h: 360 });
+  useEffect(() => {
+    const col = colBox.current, below = belowBox.current;
+    if (!col || !below) return;
+    // the map takes whatever room is left above the controls and text, kept at 5:3
+    const measure = () => {
+      const aw = col.clientWidth, ah = col.clientHeight - below.offsetHeight - 4;
+      const w = Math.max(200, Math.min(aw, (ah * W) / H));
+      setFit2({ w: Math.floor(w), h: Math.floor((w * H) / W) });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(col);
+    ro.observe(below);
+    return () => ro.disconnect();
+  }, []);
   const [announce, setAnnounce] = useState("");
   const seen = useRef(new Set<string>());
   selRef.current = selected;
@@ -669,6 +687,10 @@ export default function DroneApp() {
         .drone-root[data-orbit="true"] .mbtn{height:56px;width:56px}
         .drone-root[data-orbit="true"][data-tier="s"] .btn{min-height:48px}.drone-root[data-orbit="true"][data-tier="s"] .mbtn{height:48px;width:48px}
         .drone-root[data-tier="xs"] .hide-short{display:none}
+        .drone-root[data-tier="l"] .conf-why{white-space:normal;overflow:visible;text-overflow:clip}
+        .drone-root .ctl{gap:6px}
+        .drone-root[data-tier="l"] .ctl{gap:16px}
+        .drone-root[data-tier="s"] .ctl{gap:10px}
         .drone-root[data-orbit="true"][data-tier="xs"] .btn{min-height:44px}.drone-root[data-orbit="true"][data-tier="xs"] .mbtn{height:44px;width:44px}
       `}</style>
       <div className="sr-only" role="status" aria-live="assertive">{announce}</div>
@@ -692,7 +714,7 @@ export default function DroneApp() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_320px]">
+      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_320px] grid-rows-[minmax(0,1fr)] gap-3">
         {/* LEFT: what needs me, and every drone at a glance */}
         <div className="flex min-h-0 flex-col gap-3">
           <section aria-label="Needs attention" className="order-1 rounded-lg border border-white/15 bg-white/[0.04] p-2">
@@ -755,8 +777,9 @@ export default function DroneApp() {
         </div>
 
         {/* CENTRE: the map */}
-        <div className="flex min-h-0 min-w-0 flex-col items-start">
-          <div className="relative w-full w-[min(100%,calc((var(--dh)_-_400px)*1.6667))]" style={{ aspectRatio: `${W}/${H}` }}>
+        <div ref={colBox} className="flex min-h-0 min-w-0 flex-col items-start">
+          <div className="relative w-full shrink-0" style={{ height: fit2.h }}>
+          <div className="absolute left-0 top-0" style={{ width: fit2.w, height: fit2.h }}>
             <canvas
               ref={canvas}
               width={W}
@@ -782,6 +805,8 @@ export default function DroneApp() {
               </div>
             )}
           </div>
+          </div>
+          <div ref={belowBox} className="w-full">
           <div className="mt-2 flex w-full flex-wrap items-center gap-2" role="toolbar" aria-label="Map controls">
             <button className={mb} aria-label="Zoom out" onClick={() => zoomAt(0.5)}>−</button>
             <button className={mb} aria-label="Zoom in" onClick={() => zoomAt(2)}>+</button>
@@ -820,6 +845,7 @@ export default function DroneApp() {
               <p className="mt-1">1–6 select a drone · WASD / arrows fly it manually. All commands reach the drone after the link delay.</p>
             </div>
           </details>
+          </div>
         </div>
 
         {/* RIGHT: selected drone, then swarm-wide controls */}
@@ -841,7 +867,7 @@ export default function DroneApp() {
                   <span className="h-2 w-14 overflow-hidden rounded bg-white/10"><span className="block h-full" style={{ width: `${sd.conf * 100}%`, background: sd.conf > 0.7 ? "#6ee7b7" : sd.conf > 0.4 ? "#ffb454" : "#ff6b6b" }} /></span>
                   {sd.conf > 0.7 ? "High" : sd.conf > 0.4 ? "Medium" : "Low"} {(sd.conf * 100).toFixed(0)}%
                 </dd>
-                <dd className="hide-short truncate text-xs text-slate-400" title={sd.confWhy}>{sd.confWhy}</dd>
+                <dd className="hide-short conf-why truncate text-xs text-slate-400" title={sd.confWhy}>{sd.confWhy}</dd>
               </div>
               <div><dt className={dim}>Track record</dt><dd className="min-h-[2.4em] text-xs text-slate-300">{sd.stats.legs} legs · {sd.stats.approved} approved · {sd.stats.vetoed} vetoed · {sd.stats.overrides} overridden · {sd.stats.recoveries} self-recoveries</dd></div>
             </dl>
@@ -853,7 +879,7 @@ export default function DroneApp() {
             </div>
           </section>
 
-          <section aria-label="Swarm controls" className="order-5 flex flex-col gap-1.5">
+          <section aria-label="Swarm controls" className="ctl order-5 flex flex-col">
             <div className="grid grid-cols-3 gap-1.5">
               <button className={`${btn} !px-1`} onClick={() => sim.current.drones.forEach((d) => cmd("auto", d.id))}>Survey all</button>
               <button className={`${btn} !px-1 ${confirm === "recall" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("recall", () => sim.current.drones.forEach((d) => cmd("rtb", d.id)))}>
@@ -863,7 +889,7 @@ export default function DroneApp() {
                 {confirm === "reset" ? "Confirm?" : "Reset"}
               </button>
             </div>
-            <label className="block text-xs text-slate-300">
+            <label className="block text-[13px] text-slate-300">
               Send {sd.name} to
               <select
                 className="btn mt-0.5 block w-full rounded-md border border-white/20 bg-[#10131a] px-2"
@@ -878,7 +904,7 @@ export default function DroneApp() {
               </select>
             </label>
             <fieldset>
-              <legend className="text-xs text-slate-300">Autonomy policy</legend>
+              <legend className="text-[13px] text-slate-300">Autonomy policy</legend>
               <div className="mt-0.5 grid grid-cols-3 gap-1.5" role="radiogroup">
                 {([["ask", "Ask first"], ["veto", "Veto window"], ["full", "Full auto"]] as const).map(([v, label]) => (
                   <button key={v} role="radio" aria-checked={autonomy === v} onClick={() => setAutonomy(v)} className={`${seg(autonomy === v)} leading-tight`}>{label}</button>
@@ -891,7 +917,7 @@ export default function DroneApp() {
               </p>
             </fieldset>
             <div>
-              <p className="text-xs text-slate-300">Operator link · {latency.toFixed(1)} s one-way</p>
+              <p className="text-[13px] text-slate-300">Operator link · {latency.toFixed(1)} s one-way</p>
               <div className="mt-0.5 grid grid-cols-3 gap-1.5">
                 <button className={seg(latency === 0.2)} onClick={() => setLatency(0.2)}>Crew 0.2 s</button>
                 <button className={seg(latency === 1.3)} onClick={() => setLatency(1.3)}>Earth 1.3 s</button>
@@ -900,7 +926,7 @@ export default function DroneApp() {
               <input aria-label="Link delay in seconds" type="range" min={0} max={3} step={0.1} value={latency} onChange={(e) => setLatency(Number(e.target.value))} className="mt-1 block h-6 w-full" />
             </div>
             <div className="grid grid-cols-4 items-center gap-1.5">
-              <span className="text-xs text-slate-300">Sim speed</span>
+              <span className="text-[13px] text-slate-300">Sim speed</span>
               {[1, 4, 16].map((v) => (
                 <button key={v} aria-pressed={speed === v} onClick={() => setSpeed(v)} className={seg(speed === v)}>{v}×</button>
               ))}

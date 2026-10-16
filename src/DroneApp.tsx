@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { COMM_RANGE, type Pt, GH, GW, H, MAP_KM, MPU, PIT, W, createSim, isBlackout, mappedFraction, send, startBlackout, step, type Autonomy, type Mode, type Sim, type Stats } from "./sim";
+import { COMM_RANGE, MAX_DRONES, addDrone, type Pt, GH, GW, H, MAP_KM, MPU, PIT, W, createSim, isBlackout, mappedFraction, send, startBlackout, step, type Autonomy, type Mode, type Sim, type Stats } from "./sim";
 
 // ---------- Human-factors design notes ----------
 // 1. Situational awareness: attention queue (perceive) -> mode + intent per drone (comprehend) -> ghost
@@ -132,27 +132,37 @@ export default function DroneApp() {
     window.addEventListener("resize", on);
     return () => window.removeEventListener("resize", on);
   }, []);
-  const DW = Math.max(vp.w, 1100);
-  const DH = Math.max(vp.h, 730);
-  const scale = Math.min(vp.w / DW, vp.h / DH);
+  // Two layouts, chosen by the window's shape: a wide three-column console, or (portrait / tablet / phone)
+  // a single stacked column. Both are scaled as a whole so every control stays on screen.
+  const tall = vp.w / vp.h < 0.62; // phones held upright; tablets and everything wider use the scaled console
+  const rootBox = useRef<HTMLDivElement>(null);
+  const [contentH, setContentH] = useState(1250);
+  useEffect(() => {
+    const el = rootBox.current;
+    if (!el || !tall) return;
+    const ro = new ResizeObserver(() => setContentH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tall]);
+  const DW = tall ? 600 : Math.max(vp.w, 1100);
+  const DH = tall ? contentH : Math.max(vp.h, 730);
+  const scale = tall ? Math.min(vp.w / DW, vp.h / DH, 1) : Math.min(vp.w / DW, vp.h / DH);
   const colBox = useRef<HTMLDivElement>(null);
   const belowBox = useRef<HTMLDivElement>(null);
   const [fit2, setFit2] = useState({ w: 600, h: 360 });
+  // The map takes whatever room is left above the controls and text, kept at 5:3. Re-measured after every
+  // render (cheap, and only commits when the size really changes) so late layout changes can't push text off screen.
   useEffect(() => {
     const col = colBox.current, below = belowBox.current;
-    if (!col || !below) return;
-    // the map takes whatever room is left above the controls and text, kept at 5:3
-    const measure = () => {
+    let w = 576;
+    if (!tall) {
+      if (!col || !below) return;
       const aw = col.clientWidth, ah = col.clientHeight - below.offsetHeight - 4;
-      const w = Math.max(200, Math.min(aw, (ah * W) / H));
-      setFit2({ w: Math.floor(w), h: Math.floor((w * H) / W) });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(col);
-    ro.observe(below);
-    return () => ro.disconnect();
-  }, []);
+      w = Math.max(200, Math.min(aw, (ah * W) / H));
+    }
+    const next = { w: Math.floor(w), h: Math.floor((w * H) / W) };
+    setFit2((f) => (f.w === next.w && f.h === next.h ? f : next));
+  });
   const [announce, setAnnounce] = useState("");
   const seen = useRef(new Set<string>());
   selRef.current = selected;
@@ -598,7 +608,7 @@ export default function DroneApp() {
     const down = (e: KeyboardEvent) => {
       if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k >= "1" && k <= "6") return setSelected(Number(k) - 1);
+      if (k >= "1" && k <= "8") return setSelected(Math.min(Number(k), sim.current.drones.length) - 1);
       if (k === "+" || k === "=") return zoomAt(2);
       if (k === "-" || k === "_") return zoomAt(0.5);
       if (k === "0") return fit();
@@ -656,7 +666,7 @@ export default function DroneApp() {
   // Everything that needs the operator, most urgent first. Only what fits is shown, with a count of the rest,
   // so the layout never needs an inner scrollbar.
   const prop = view.proposals[0];
-  const alertSlots = prop ? 1 : 2;
+  const alertSlots = prop ? (view.drones.length > 6 ? 0 : 1) : 2; // a bigger swarm needs the room for its rows
   const shownAlerts = view.alerts.slice(0, alertSlots);
   const hidden = view.proposals.length - (prop ? 1 : 0) + view.alerts.length - shownAlerts.length;
   const sd = view.drones[selected];
@@ -664,14 +674,18 @@ export default function DroneApp() {
   const seg = (on: boolean) => `${btn} !px-1 ${on ? "!border-white/80 bg-white/20" : ""}`;
 
   return (
-    <div style={{ width: "100vw", height: "100dvh", overflow: "hidden", background: "#07090d" }}>
+    <div style={{ position: "relative", width: "100vw", height: "100dvh", overflow: "hidden", background: "#07090d" }}>
     <div
-      className="drone-root flex flex-col overflow-hidden bg-[#07090d] p-3 text-[15px] text-slate-100"
+      ref={rootBox}
+      className={`drone-root flex flex-col bg-[#07090d] p-3 text-[15px] text-slate-100 ${tall ? "" : "overflow-hidden"}`}
       data-orbit={orbit}
-      data-tier={DH <= 740 ? "xs" : DH <= 860 ? "s" : "l"}
+      data-tier={tall ? "s" : DH <= 740 ? "xs" : DH <= 860 ? "s" : "l"}
       style={{
+        position: "absolute",
+        left: tall ? Math.max(0, (vp.w - DW * scale) / 2) : 0,
+        top: tall ? Math.max(0, (vp.h - DH * scale) / 2) : 0,
         width: DW,
-        height: DH,
+        height: tall ? "auto" : DH,
         transform: `scale(${scale})`,
         transformOrigin: "0 0",
         // @ts-expect-error css custom property
@@ -690,7 +704,7 @@ export default function DroneApp() {
         .drone-root[data-tier="l"] .conf-why{white-space:normal;overflow:visible;text-overflow:clip}
         .drone-root .ctl{gap:6px}
         .drone-root[data-tier="l"] .ctl{gap:16px}
-        .drone-root[data-tier="s"] .ctl{gap:10px}
+        .drone-root[data-tier="s"] .ctl{gap:7px}
         .drone-root[data-orbit="true"][data-tier="xs"] .btn{min-height:44px}.drone-root[data-orbit="true"][data-tier="xs"] .mbtn{height:44px;width:44px}
       `}</style>
       <div className="sr-only" role="status" aria-live="assertive">{announce}</div>
@@ -714,9 +728,9 @@ export default function DroneApp() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_320px] grid-rows-[minmax(0,1fr)] gap-3">
+      <div className={tall ? "flex flex-col gap-3" : "grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_320px] grid-rows-[minmax(0,1fr)] gap-3"}>
         {/* LEFT: what needs me, and every drone at a glance */}
-        <div className="flex min-h-0 flex-col gap-3">
+        <div className={tall ? "contents" : "flex min-h-0 flex-col gap-3"}>
           <section aria-label="Needs attention" className="order-1 rounded-lg border border-white/15 bg-white/[0.04] p-2">
             <h2 className="flex items-center justify-between px-1 text-sm font-semibold text-slate-300">
               Needs you <span className="font-mono">{view.proposals.length + view.alerts.length}</span>
@@ -749,12 +763,12 @@ export default function DroneApp() {
             {hidden > 0 && <p className="px-1 pt-1 text-xs text-slate-300">+{hidden} more, most urgent shown first</p>}
           </section>
 
-          <section aria-label="Drones" className="order-3 flex flex-col gap-1.5">
+          <section aria-label="Drones" className={`order-3 ${view.drones.length > 6 ? "gap-1" : "gap-1.5"} ${tall ? "grid grid-cols-2" : "flex flex-col"}`}>
             <h2 className="sr-only">All drones</h2>
             {view.drones.map((d) => {
               const open = d.id === selected;
               return (
-                <button key={d.id} onClick={() => setSelected(d.id)} aria-pressed={open} className={`rounded-lg border p-1.5 text-left ${open ? "border-white/80 bg-white/12" : "border-white/15 bg-white/[0.03]"}`}>
+                <button key={d.id} onClick={() => setSelected(d.id)} aria-pressed={open} className={`rounded-lg border text-left ${view.drones.length > 6 ? "p-1" : "p-1.5"} ${open ? "border-white/80 bg-white/12" : "border-white/15 bg-white/[0.03]"}`}>
                   <span className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2 font-medium">
                       <span className="grid h-6 w-6 place-items-center rounded-full text-sm font-bold text-black" style={{ background: d.color }}>{d.id + 1}</span>
@@ -773,11 +787,23 @@ export default function DroneApp() {
                 </button>
               );
             })}
+            <button
+              className={`${btn} ${tall ? "" : "w-full"}`}
+              disabled={view.drones.length >= MAX_DRONES || view.reserve < 1}
+              title={view.drones.length >= MAX_DRONES ? `Swarm is full (${MAX_DRONES} drones)` : view.reserve < 1 ? "Not enough station propellant" : "Deploy another drone from the lander (uses 1 tank of propellant)"}
+              onClick={() => {
+                addDrone(sim.current);
+                setSelected(sim.current.drones.length - 1);
+                setView(snap(sim.current));
+              }}
+            >
+              + Add drone <span className="font-mono text-xs text-slate-300">({view.drones.length}/{MAX_DRONES})</span>
+            </button>
           </section>
         </div>
 
         {/* CENTRE: the map */}
-        <div ref={colBox} className="flex min-h-0 min-w-0 flex-col items-start">
+        <div ref={colBox} className={`flex min-w-0 flex-col items-start ${tall ? "order-2" : "min-h-0"}`}>
           <div className="relative w-full shrink-0" style={{ height: fit2.h }}>
           <div className="absolute left-0 top-0" style={{ width: fit2.w, height: fit2.h }}>
             <canvas
@@ -789,7 +815,7 @@ export default function DroneApp() {
               onPointerUp={onUp}
               onPointerCancel={onUp}
               role="img"
-              aria-label="Lunar surface map with six drones. Keyboard users: use the drone list, the Send to menu, plus and minus to zoom, Shift with arrows to pan."
+              aria-label="Lunar surface map with the drone swarm. Keyboard users: use the drone list, the Send to menu, plus and minus to zoom, Shift with arrows to pan."
               className={`block h-full w-full touch-none rounded-lg border ${view.blackout ? "border-amber-400 opacity-70" : "border-white/15"}`}
             />
             {pending && pd && (
@@ -849,7 +875,7 @@ export default function DroneApp() {
         </div>
 
         {/* RIGHT: selected drone, then swarm-wide controls */}
-        <div className="flex min-h-0 flex-col gap-2">
+        <div className={tall ? "order-4 grid grid-cols-2 items-start gap-3" : "flex min-h-0 flex-col gap-2"}>
           <section aria-label="Selected drone" className="order-4 rounded-lg border border-white/30 bg-white/[0.06] p-2.5">
             <h2 className="flex items-center justify-between gap-2 text-sm font-semibold">
               <span className="flex items-center gap-2">
@@ -885,7 +911,7 @@ export default function DroneApp() {
               <button className={`${btn} !px-1 ${confirm === "recall" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("recall", () => sim.current.drones.forEach((d) => cmd("rtb", d.id)))}>
                 {confirm === "recall" ? "Confirm?" : "Recall all"}
               </button>
-              <button className={`${btn} !px-1 ${confirm === "reset" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("reset", () => { sim.current = createSim(latency, autonomy); setView(snap(sim.current)); })}>
+              <button className={`${btn} !px-1 ${confirm === "reset" ? "!border-amber-400 !text-amber-300" : ""}`} onClick={guarded("reset", () => { sim.current = createSim(latency, autonomy); setSelected(0); setView(snap(sim.current)); })}>
                 {confirm === "reset" ? "Confirm?" : "Reset"}
               </button>
             </div>

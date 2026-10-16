@@ -80,7 +80,9 @@ export type Sim = {
 };
 
 // Okabe-Ito colour-blind-safe set
-const COLORS = ["#56B4E9", "#E69F00", "#CC79A7", "#009E73", "#F0E442", "#D55E00"];
+const COLORS = ["#56B4E9", "#E69F00", "#CC79A7", "#009E73", "#F0E442", "#D55E00", "#B79CFF", "#D9D9D9"];
+export const MAX_DRONES = COLORS.length;
+export const START_DRONES = 6;
 
 export function createSim(latency = 1.3, autonomy: Autonomy = "veto"): Sim {
   const station = { x: 200, y: 480 };
@@ -90,7 +92,7 @@ export function createSim(latency = 1.3, autonomy: Autonomy = "veto"): Sim {
     { name: "Survey site B", x: 520, y: 760, found: false },
     { name: "Survey site C", x: 1330, y: 790, found: false },
   ];
-  const drones: Drone[] = COLORS.map((color, i) => ({
+  const drones: Drone[] = COLORS.slice(0, START_DRONES).map((color, i) => ({
     id: i,
     name: `LUNA-${i + 1}`,
     color,
@@ -473,4 +475,37 @@ export function step(s: Sim, dt: number) {
     }
     localize(s, d, dt);
   }
+}
+
+// Deploy one more drone from the lander. It leaves with a full tank, which comes out of the station's propellant.
+export function addDrone(s: Sim): string | null {
+  if (s.drones.length >= MAX_DRONES) return `Swarm is full (${MAX_DRONES} drones).`;
+  if (s.reserve < 1) return "Not enough propellant at the station to fuel another drone.";
+  const i = s.drones.length;
+  s.drones.push({
+    id: i,
+    name: `LUNA-${i + 1}`,
+    color: COLORS[i],
+    x: s.station.x + (i % 3) * 14 - 14,
+    y: s.station.y + Math.floor(i / 3) * 14 - 7,
+    mode: "idle",
+    resume: false,
+    fuel: 100,
+    flights: 0,
+    path: [],
+    goal: null,
+    input: { x: 0, y: 0 },
+    err: 1,
+    links: 3,
+    moved: 0,
+    awaiting: null,
+    avoid: null,
+    why: "",
+    stats: { legs: 0, vetoed: 0, approved: 0, overrides: 0, recoveries: 0 },
+    savedMode: null,
+    savedGoal: null,
+  });
+  s.reserve -= 1;
+  log(s, `LUNA-${i + 1} deployed at the lander (1 tank used, ${s.reserve.toFixed(1)} left).`, "CREW");
+  return null;
 }
